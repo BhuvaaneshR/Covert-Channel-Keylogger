@@ -1,4 +1,5 @@
 from scapy.all import sniff, IP, ICMP, UDP, DNS, DNSQR
+import base64
 import math
 import time
 import json
@@ -24,6 +25,8 @@ MIN_SUBDOMAIN_LEN = 6                   # Ignore trivially short subdomains
 
 # Regex: hex payloads use ONLY [0-9a-f] (lowercase, from .encode().hex())
 _HEX_RE = re.compile(r'^[0-9a-f]+$')
+# Regex: Base64 standard and URL-safe characters
+_B64_RE = re.compile(r'^[A-Za-z0-9+/=_-]+$')
 
 
 # ============================================================
@@ -81,6 +84,29 @@ def _hex_decode(hex_str: str) -> str:
     """Attempts to reverse dns_exfil.py's hex encoding back to plaintext."""
     try:
         return bytes.fromhex(hex_str).decode('utf-8', errors='replace')
+    except Exception:
+        return ""
+
+
+def _is_base64_subdomain(subdomain: str) -> bool:
+    """Returns True if subdomain matches Base64 encoding heuristics."""
+    if len(subdomain) < 8:
+        return False
+    if not bool(_B64_RE.match(subdomain)):
+        return False
+    if not any(c.isupper() for c in subdomain):
+        return False
+    if _shannon_entropy(subdomain) < 3.0:
+        return False
+    return True
+
+
+def _b64_decode(b64_str: str) -> str:
+    """Attempts to reverse URL-safe Base64 encoding back to plaintext."""
+    try:
+        pad = b64_str + "=" * ((4 - len(b64_str) % 4) % 4)
+        raw_bytes = base64.urlsafe_b64decode(pad)
+        return raw_bytes.decode('utf-8', errors='replace')
     except Exception:
         return ""
 
@@ -206,7 +232,18 @@ class FeatureExtractor:
         subdomain = full_query.split('.')[0]
 
         is_hex     = _is_hex_subdomain(subdomain)
-        decoded    = _hex_decode(subdomain) if is_hex else ""
+        is_b64     = _is_base64_subdomain(subdomain) if not is_hex else False
+        
+        if is_hex:
+            decoded = _hex_decode(subdomain)
+            encoding = "HEX"
+        elif is_b64:
+            decoded = _b64_decode(subdomain)
+            encoding = "BASE64"
+        else:
+            decoded = ""
+            encoding = "NONE"
+
         entropy    = round(_shannon_entropy(subdomain), 4)
         targets    = TARGET_DOMAIN in full_query
 
@@ -220,7 +257,9 @@ class FeatureExtractor:
             "dns_subdomain"      : subdomain,
             "dns_subdomain_len"  : len(subdomain),
             "dns_entropy"        : entropy,
+            "dns_encoding"       : encoding,
             "dns_is_hex_pattern" : is_hex,
+            "dns_is_b64_pattern" : is_b64,
             "dns_decoded_text"   : decoded,
         }
 

@@ -1,4 +1,5 @@
 from scapy.all import sniff, IP, UDP, DNS, DNSQR
+import base64
 import math
 import time
 import re
@@ -39,6 +40,9 @@ MIN_SUBDOMAIN_LEN = 6
 # Compiled regex — only hex characters (lowercase, as produced by .hex())
 HEX_PATTERN = re.compile(r'^[0-9a-f]+$')
 
+# Matches standard and URL-safe Base64 characters
+B64_PATTERN = re.compile(r'^[A-Za-z0-9+/=_-]+$')
+
 def is_hex_payload(subdomain: str) -> bool:
     """
     Returns True if the subdomain looks like hex-encoded exfiltration data.
@@ -72,6 +76,35 @@ def calculate_entropy(data_string: str) -> float:
     return entropy
 
 
+def is_base64_payload(subdomain: str) -> bool:
+    """
+    Returns True if the subdomain looks like URL-safe Base64 encoded data.
+    """
+    if len(subdomain) < 8:
+        return False
+    if not bool(B64_PATTERN.match(subdomain)):
+        return False
+    if not any(c.isupper() for c in subdomain):
+        return False
+    if calculate_entropy(subdomain) < 3.0:
+        return False
+    return True
+
+
+def try_decode_b64_payload(b64_subdomain: str) -> str:
+    """
+    Attempts to decode URL-safe Base64 back to plaintext.
+    """
+    try:
+        missing_padding = len(b64_subdomain) % 4
+        if missing_padding:
+            b64_subdomain += '=' * (4 - missing_padding)
+        raw_bytes = base64.urlsafe_b64decode(b64_subdomain)
+        return raw_bytes.decode('utf-8', errors='replace')
+    except Exception as e:
+        return f"[b64 decode failed: {e}]"
+
+
 def try_decode_payload(hex_subdomain: str) -> str:
     """
     Attempts to hex-decode the subdomain back into the original keystrokes.
@@ -84,18 +117,26 @@ def try_decode_payload(hex_subdomain: str) -> str:
         return "[decode failed]"
 
 
-def _raise_alert(subdomain: str, full_query: str, entropy_score: float):
+def _raise_alert(subdomain: str, full_query: str, entropy_score: float, encoding: str = "HEX"):
     """Prints a structured alert showing the detected exfiltration."""
-    decoded = try_decode_payload(subdomain)
+    if encoding == "HEX":
+        decoded = try_decode_payload(subdomain)
+        payload_desc = f"{len(subdomain)} hex chars ({len(subdomain)//2} bytes)"
+        detection_desc = "Hex character pattern + even length"
+    else:
+        decoded = try_decode_b64_payload(subdomain)
+        payload_desc = f"{len(subdomain)} b64 chars"
+        detection_desc = "Base64 character pattern + entropy + case mix"
+
     print("\n" + "=" * 60)
     print("[!!!] ALERT: COVERT DNS EXFILTRATION DETECTED!")
     print(f"      Source IP     : {VICTIM_IP}")
     print(f"      Full Query    : {full_query}")
-    print(f"      Hex Payload   : {subdomain}")
+    print(f"      Payload       : {subdomain} ({encoding})")
     print(f"      Decoded Text  : {decoded!r}")          # ← actual stolen keystrokes
-    print(f"      Payload Len   : {len(subdomain)} hex chars ({len(subdomain)//2} bytes)")
+    print(f"      Payload Len   : {payload_desc}")
     print(f"      Entropy Score : {entropy_score:.3f} bits (display only)")
-    print(f"      Detection     : Hex character pattern + even length")
+    print(f"      Detection     : {detection_desc}")
     print(f"      Timestamp     : {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60 + "\n")
 
@@ -147,9 +188,11 @@ def packet_callback(packet):
         end="\r"
     )
 
-    # PRIMARY DETECTION: Hex character pattern
+    # PRIMARY DETECTION: Hex OR Base64 character pattern
     if is_hex_payload(subdomain):
-        _raise_alert(subdomain, full_query, entropy_score)
+        _raise_alert(subdomain, full_query, entropy_score, encoding="HEX")
+    elif is_base64_payload(subdomain):
+        _raise_alert(subdomain, full_query, entropy_score, encoding="BASE64")
 
 
 # ============================================================
@@ -159,7 +202,7 @@ print(f"[*] DNS Covert Channel Detector started")
 print(f"[*] Interface   : {INTERFACE}")
 print(f"[*] Watching    : {VICTIM_IP}  (UDP Port 53)")
 print(f"[*] Target      : *.{TARGET_DOMAIN}")
-print(f"[*] Detection   : Hex pattern [0-9a-f] + even length (NOT entropy)")
+print(f"[*] Detection   : Hex pattern AND Base64 pattern detection")
 print(f"[*] Min length  : {MIN_SUBDOMAIN_LEN} hex chars")
 print(f"[*] Note        : Decoded keystrokes shown on every alert")
 print(f"[*] Waiting for DNS traffic...\n")
